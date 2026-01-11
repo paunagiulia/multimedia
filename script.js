@@ -1,101 +1,141 @@
-let albumsData = [];
-const container = document.getElementById("albums");
-const searchInput = document.getElementById("searchInput");
-const sortSelect = document.getElementById("sortSelect");
+const canvas = document.getElementById("chart");
+const ctx = canvas.getContext("2d");
 
-fetch("library.json")
-  .then(r => r.json())
-  .then(data => {
-    albumsData = data;
-    renderAlbums(data);
-  });
+let running = true;
+let interval = 800;
+let minVal = 10;
+let maxVal = 100;
+let showGrid = true;
+let smooth = false;
+let type = "line";
 
-function renderAlbums(list) {
-  container.innerHTML = "";
-  list.forEach((a, i) => {
-    const col = document.createElement("div");
-    col.className = "col-12 col-sm-6 col-md-4 col-lg-3";
-    col.innerHTML = `
-      <div class="card">
-        <img src="assets/img/${a.thumbnail}" class="card-img-top">
-        <div class="card-body">
-          <h5 class="card-title">${a.artist}</h5>
-          <p class="card-text">${a.album}</p>
-        </div>
-        <div class="card-footer text-center">
-          <button class="btn btn-primary viewBtn" data-index="${i}" data-bs-toggle="modal" data-bs-target="#trackModal">
-            View Tracklist
-          </button>
-        </div>
-      </div>
-    `;
-    container.appendChild(col);
+const maxPoints = 30;
+
+let series = [
+  { color: "red", data: [] },
+  { color: "lime", data: [] },
+  { color: "cyan", data: [] }
+];
+
+function randomVal() {
+  return Math.floor(Math.random() * (maxVal - minVal)) + minVal;
+}
+
+function addData() {
+  series.forEach(s => {
+    if (s.data.length >= maxPoints) s.data.shift();
+    s.data.push(randomVal());
   });
 }
 
-container.addEventListener("click", e => {
-  if (!e.target.classList.contains("viewBtn")) return;
+function drawGrid() {
+  if (!showGrid) return;
+  ctx.strokeStyle = "rgba(255,255,255,0.1)";
+  for (let i = 0; i < 10; i++) {
+    ctx.beginPath();
+    ctx.moveTo(0, i * 40);
+    ctx.lineTo(canvas.width, i * 40);
+    ctx.stroke();
+  }
+}
 
-  const album = albumsData[e.target.dataset.index];
-  document.getElementById("modalTitle").textContent = `${album.artist} - ${album.album}`;
+function getAvg(data) {
+  return data.reduce((a,b) => a+b,0) / data.length;
+}
 
-  const list = document.getElementById("trackList");
-  list.innerHTML = "";
+function draw() {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  drawGrid();
 
-  let totalSeconds = 0;
-  let longest = album.tracks[0];
-  let shortest = album.tracks[0];
+  series.forEach(s => {
+    ctx.strokeStyle = s.color;
+    ctx.fillStyle = s.color;
 
-  album.tracks.forEach(t => {
-    const li = document.createElement("li");
-    li.className = "list-group-item";
-    li.innerHTML = `<a href="${t.url}" target="_blank">${t.title}</a> (${t.length})`;
-    list.appendChild(li);
+    if (type === "bar") {
+      s.data.forEach((v,i) => {
+        ctx.fillRect(i*25, canvas.height-v*3, 15, v*3);
+      });
+      return;
+    }
 
-    const s = toSeconds(t.length);
-    totalSeconds += s;
-    if (s > toSeconds(longest.length)) longest = t;
-    if (s < toSeconds(shortest.length)) shortest = t;
+    ctx.beginPath();
+    s.data.forEach((v,i) => {
+      let x = i * (canvas.width / maxPoints);
+      let y = canvas.height - v * 3;
+      if (i === 0) ctx.moveTo(x,y);
+      else ctx.lineTo(x,y);
+
+      if (type === "scatter") {
+        ctx.beginPath();
+        ctx.arc(x,y,4,0,Math.PI*2);
+        ctx.fill();
+      }
+    });
+
+    if (type === "area") {
+      ctx.lineTo(canvas.width, canvas.height);
+      ctx.lineTo(0, canvas.height);
+      ctx.globalAlpha = 0.3;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+
+    if (type !== "scatter") ctx.stroke();
   });
 
-  const avg = Math.round(totalSeconds / album.tracks.length);
-  document.getElementById("stats").innerHTML = `
-    <strong>Tracks:</strong> ${album.tracks.length}<br>
-    <strong>Total:</strong> ${fromSeconds(totalSeconds)}<br>
-    <strong>Average:</strong> ${fromSeconds(avg)}<br>
-    <strong>Longest:</strong> ${longest.title}<br>
-    <strong>Shortest:</strong> ${shortest.title}
-  `;
-
-  document.getElementById("spotifyBtn").href = album.tracks[0].url;
-});
-
-searchInput.addEventListener("input", () => {
-  const val = searchInput.value.toLowerCase();
-  renderAlbums(albumsData.filter(a =>
-    a.artist.toLowerCase().includes(val) ||
-    a.album.toLowerCase().includes(val)
-  ));
-});
-
-sortSelect.addEventListener("change", () => {
-  let sorted = [...albumsData];
-  if (sortSelect.value === "artist")
-    sorted.sort((a,b) => a.artist.localeCompare(b.artist));
-  if (sortSelect.value === "album")
-    sorted.sort((a,b) => a.album.localeCompare(b.album));
-  if (sortSelect.value === "tracksAsc")
-    sorted.sort((a,b) => a.tracks.length - b.tracks.length);
-  if (sortSelect.value === "tracksDesc")
-    sorted.sort((a,b) => b.tracks.length - a.tracks.length);
-  renderAlbums(sorted);
-});
-
-function toSeconds(t) {
-  const [m,s] = t.split(":").map(Number);
-  return m * 60 + s;
+  updateStats();
 }
 
-function fromSeconds(sec) {
-  return Math.floor(sec/60) + ":" + String(sec%60).padStart(2,"0");
+function updateStats() {
+  const data = series[0].data;
+  if (!data.length) return;
+
+  document.getElementById("current").textContent = data[data.length-1];
+  document.getElementById("min").textContent = Math.min(...data);
+  document.getElementById("max").textContent = Math.max(...data);
+  document.getElementById("avg").textContent = getAvg(data).toFixed(1);
+  document.getElementById("trend").textContent =
+    data[data.length-1] > data[0] ? "Rising" : "Falling";
 }
+
+canvas.addEventListener("mousemove", e => {
+  const x = Math.floor(e.offsetX / (canvas.width / maxPoints));
+  const v = series[0].data[x];
+  if (v) {
+    canvas.title = `Index: ${x}, Value: ${v}`;
+  }
+});
+
+document.getElementById("toggleRun").onclick = () => {
+  running = !running;
+  document.getElementById("toggleRun").textContent = running ? "Pause" : "Start";
+};
+
+document.getElementById("reset").onclick = () => {
+  series.forEach(s => s.data = []);
+};
+
+document.getElementById("speed").oninput = e => interval = +e.target.value;
+document.getElementById("minVal").oninput = e => minVal = +e.target.value;
+document.getElementById("maxVal").oninput = e => maxVal = +e.target.value;
+document.getElementById("grid").onchange = e => showGrid = e.target.checked;
+document.getElementById("smooth").onchange = e => smooth = e.target.checked;
+document.getElementById("chartType").onchange = e => type = e.target.value;
+
+document.getElementById("theme").onchange = e => {
+  document.body.className = e.target.value;
+};
+
+document.getElementById("export").onclick = () => {
+  const a = document.createElement("a");
+  a.href = canvas.toDataURL();
+  a.download = "chart.png";
+  a.click();
+};
+
+setInterval(() => {
+  if (running) {
+    addData();
+    draw();
+  }
+}, interval);
