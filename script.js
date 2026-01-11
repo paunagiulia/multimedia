@@ -1,109 +1,101 @@
-const wordList = [
-  "media","sound","video","light","pixel",
-  "color","music","input","frame","logic"
-];
+let albumsData = [];
+const container = document.getElementById("albums");
+const searchInput = document.getElementById("searchInput");
+const sortSelect = document.getElementById("sortSelect");
 
-let secretWord = "";
-let rowIndex = 0;
-let finished = false;
+fetch("library.json")
+  .then(r => r.json())
+  .then(data => {
+    albumsData = data;
+    renderAlbums(data);
+  });
 
-let games = 0;
-let wins = 0;
-let streak = 0;
-
-const board = document.getElementById("board");
-const input = document.getElementById("wordInput");
-const info = document.getElementById("info");
-const newGameBtn = document.getElementById("newGame");
-
-function createBoard() {
-  board.innerHTML = "";
-  for (let i = 0; i < 6; i++) {
-    const row = document.createElement("div");
-    row.className = "row";
-    for (let j = 0; j < 5; j++) {
-      const cell = document.createElement("div");
-      cell.className = "cell";
-      row.appendChild(cell);
-    }
-    board.appendChild(row);
-  }
+function renderAlbums(list) {
+  container.innerHTML = "";
+  list.forEach((a, i) => {
+    const col = document.createElement("div");
+    col.className = "col-12 col-sm-6 col-md-4 col-lg-3";
+    col.innerHTML = `
+      <div class="card">
+        <img src="assets/img/${a.thumbnail}" class="card-img-top">
+        <div class="card-body">
+          <h5 class="card-title">${a.artist}</h5>
+          <p class="card-text">${a.album}</p>
+        </div>
+        <div class="card-footer text-center">
+          <button class="btn btn-primary viewBtn" data-index="${i}" data-bs-toggle="modal" data-bs-target="#trackModal">
+            View Tracklist
+          </button>
+        </div>
+      </div>
+    `;
+    container.appendChild(col);
+  });
 }
 
-function startGame() {
-  secretWord = wordList[Math.floor(Math.random() * wordList.length)];
-  rowIndex = 0;
-  finished = false;
-  info.textContent = "";
-  input.value = "";
-  newGameBtn.classList.add("hidden");
-  createBoard();
-}
+container.addEventListener("click", e => {
+  if (!e.target.classList.contains("viewBtn")) return;
 
-function checkWord() {
-  if (finished) return;
+  const album = albumsData[e.target.dataset.index];
+  document.getElementById("modalTitle").textContent = `${album.artist} - ${album.album}`;
 
-  const guess = input.value.toLowerCase();
+  const list = document.getElementById("trackList");
+  list.innerHTML = "";
 
-  if (guess.length !== 5) {
-    info.textContent = "Word must have 5 letters.";
-    return;
-  }
+  let totalSeconds = 0;
+  let longest = album.tracks[0];
+  let shortest = album.tracks[0];
 
-  const result = Array(5).fill("wrong");
-  let tempWord = secretWord.split("");
+  album.tracks.forEach(t => {
+    const li = document.createElement("li");
+    li.className = "list-group-item";
+    li.innerHTML = `<a href="${t.url}" target="_blank">${t.title}</a> (${t.length})`;
+    list.appendChild(li);
 
-  for (let i = 0; i < 5; i++) {
-    if (guess[i] === tempWord[i]) {
-      result[i] = "correct";
-      tempWord[i] = null;
-    }
-  }
+    const s = toSeconds(t.length);
+    totalSeconds += s;
+    if (s > toSeconds(longest.length)) longest = t;
+    if (s < toSeconds(shortest.length)) shortest = t;
+  });
 
-  for (let i = 0; i < 5; i++) {
-    if (result[i] === "correct") continue;
-    const index = tempWord.indexOf(guess[i]);
-    if (index !== -1) {
-      result[i] = "present";
-      tempWord[index] = null;
-    }
-  }
+  const avg = Math.round(totalSeconds / album.tracks.length);
+  document.getElementById("stats").innerHTML = `
+    <strong>Tracks:</strong> ${album.tracks.length}<br>
+    <strong>Total:</strong> ${fromSeconds(totalSeconds)}<br>
+    <strong>Average:</strong> ${fromSeconds(avg)}<br>
+    <strong>Longest:</strong> ${longest.title}<br>
+    <strong>Shortest:</strong> ${shortest.title}
+  `;
 
-  const row = board.children[rowIndex];
-  for (let i = 0; i < 5; i++) {
-    row.children[i].textContent = guess[i];
-    row.children[i].classList.add(result[i]);
-  }
-
-  if (guess === secretWord) {
-    info.textContent = "You won!";
-    finished = true;
-    games++;
-    wins++;
-    streak++;
-    newGameBtn.classList.remove("hidden");
-  } else {
-    rowIndex++;
-    if (rowIndex === 6) {
-      info.textContent = "You lost! Word was: " + secretWord.toUpperCase();
-      finished = true;
-      games++;
-      streak = 0;
-      newGameBtn.classList.remove("hidden");
-    }
-  }
-
-  document.getElementById("games").textContent = games;
-  document.getElementById("wins").textContent = wins;
-  document.getElementById("streak").textContent = streak;
-
-  input.value = "";
-}
-
-document.getElementById("checkBtn").addEventListener("click", checkWord);
-input.addEventListener("keydown", e => {
-  if (e.key === "Enter") checkWord();
+  document.getElementById("spotifyBtn").href = album.tracks[0].url;
 });
-newGameBtn.addEventListener("click", startGame);
 
-startGame();
+searchInput.addEventListener("input", () => {
+  const val = searchInput.value.toLowerCase();
+  renderAlbums(albumsData.filter(a =>
+    a.artist.toLowerCase().includes(val) ||
+    a.album.toLowerCase().includes(val)
+  ));
+});
+
+sortSelect.addEventListener("change", () => {
+  let sorted = [...albumsData];
+  if (sortSelect.value === "artist")
+    sorted.sort((a,b) => a.artist.localeCompare(b.artist));
+  if (sortSelect.value === "album")
+    sorted.sort((a,b) => a.album.localeCompare(b.album));
+  if (sortSelect.value === "tracksAsc")
+    sorted.sort((a,b) => a.tracks.length - b.tracks.length);
+  if (sortSelect.value === "tracksDesc")
+    sorted.sort((a,b) => b.tracks.length - a.tracks.length);
+  renderAlbums(sorted);
+});
+
+function toSeconds(t) {
+  const [m,s] = t.split(":").map(Number);
+  return m * 60 + s;
+}
+
+function fromSeconds(sec) {
+  return Math.floor(sec/60) + ":" + String(sec%60).padStart(2,"0");
+}
